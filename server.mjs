@@ -43,6 +43,23 @@ function sendJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
+const allowedOrigins = new Set(
+  (process.env.ALLOWED_ORIGINS || 'https://ywsfsfyan269-wq.github.io')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+
+function applyCors(request, response) {
+  const origin = request.headers.origin;
+  if (!origin || !allowedOrigins.has(origin)) return !origin;
+  response.setHeader('Access-Control-Allow-Origin', origin);
+  response.setHeader('Vary', 'Origin');
+  response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  return true;
+}
+
 function cleanText(value, maxLength) {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, maxLength) : '';
 }
@@ -178,7 +195,15 @@ async function handleOrder(request, response) {
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || '/', 'http://localhost');
-  if (request.method === 'POST' && url.pathname === '/api/orders') return handleOrder(request, response);
+  if (url.pathname === '/health') return sendJson(response, 200, { ok: true });
+  if (url.pathname === '/api/orders') {
+    if (!applyCors(request, response)) return sendJson(response, 403, { message: 'مصدر الطلب غير مسموح.' });
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204);
+      return response.end();
+    }
+    if (request.method === 'POST') return handleOrder(request, response);
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     response.writeHead(405, { Allow: 'GET, HEAD, POST' });
     return response.end('Method Not Allowed');
@@ -193,7 +218,7 @@ const server = createServer(async (request, response) => {
   }
   if (pathname === '/') pathname = '/index.html';
   const pathParts = pathname.split('/').filter(Boolean);
-  const publicRootFiles = new Set(['/index.html', '/styles.css', '/script.js']);
+  const publicRootFiles = new Set(['/index.html', '/styles.css', '/script.js', '/api-config.js']);
   const isPublicAsset = pathParts[0] === 'assets' && pathParts.length >= 2;
   if (pathParts.some((part) => part === '..' || part.startsWith('.')) || (!publicRootFiles.has(pathname) && !isPublicAsset)) {
     response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
