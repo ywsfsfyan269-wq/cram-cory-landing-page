@@ -65,6 +65,7 @@ updateOrderSummary();
 
 const orderForm = document.querySelector('#order-form');
 const orderError = document.querySelector('#order-error');
+const orderApiBase = (window.CRAM_CORY_API_URL || '').replace(/\/+$/, '');
 if (orderForm) {
   orderForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -83,7 +84,7 @@ if (orderForm) {
     payload.quantity = Number(payload.quantity);
 
     try {
-      const response = await fetch('/api/orders', {
+      const response = await fetch(`${orderApiBase}/api/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
