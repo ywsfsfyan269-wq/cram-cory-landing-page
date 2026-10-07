@@ -1,1 +1,1 @@
-window.CRAM_CORY_API_URL = '';
+window.CRAM_CORY_API_URL = 'https://cram-cory-orders.onrender.com';
