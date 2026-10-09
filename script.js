@@ -8,7 +8,125 @@ document.querySelectorAll('a[href^="#"]').forEach((link) => {
   });
 });
 
+const galleryCarousel = document.querySelector('[data-gallery-carousel]');
+if (galleryCarousel) {
+  const galleryTrack = galleryCarousel.querySelector('#gallery-track');
+  const gallerySlides = [...galleryCarousel.querySelectorAll('.gallery-slide')];
+  const galleryDots = [...galleryCarousel.querySelectorAll('[data-gallery-dot]')];
+  const galleryCounter = galleryCarousel.querySelector('[data-gallery-counter]');
+  const galleryToggle = galleryCarousel.querySelector('[data-gallery-toggle]');
+  const reduceGalleryMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let activeGallerySlide = 0;
+  let galleryPaused = reduceGalleryMotion;
+  let galleryHovered = false;
+  let galleryFocused = false;
+  let galleryTimer;
+
+  const showGallerySlide = (index) => {
+    activeGallerySlide = (index + gallerySlides.length) % gallerySlides.length;
+    galleryTrack.style.transform = `translateX(-${activeGallerySlide * 100}%)`;
+    gallerySlides.forEach((slide, slideIndex) => {
+      slide.setAttribute('aria-hidden', String(slideIndex !== activeGallerySlide));
+    });
+    galleryDots.forEach((dot, dotIndex) => {
+      if (dotIndex === activeGallerySlide) dot.setAttribute('aria-current', 'true');
+      else dot.removeAttribute('aria-current');
+    });
+    if (galleryCounter) galleryCounter.textContent = `${String(activeGallerySlide + 1).padStart(2, '0')} / ${String(gallerySlides.length).padStart(2, '0')}`;
+  };
+
+  const syncGalleryTimer = () => {
+    window.clearInterval(galleryTimer);
+    if (!galleryPaused && !galleryHovered && !galleryFocused && !document.hidden) {
+      galleryTimer = window.setInterval(() => showGallerySlide(activeGallerySlide + 1), 5000);
+    }
+    if (galleryToggle) {
+      galleryToggle.textContent = galleryPaused ? 'تشغيل تلقائي' : 'إيقاف الحركة';
+      galleryToggle.setAttribute('aria-label', galleryPaused ? 'تشغيل التبديل التلقائي' : 'إيقاف التبديل التلقائي');
+      galleryToggle.setAttribute('aria-pressed', String(galleryPaused));
+    }
+  };
+
+  galleryCarousel.querySelector('[data-gallery-prev]')?.addEventListener('click', () => { showGallerySlide(activeGallerySlide - 1); syncGalleryTimer(); });
+  galleryCarousel.querySelector('[data-gallery-next]')?.addEventListener('click', () => { showGallerySlide(activeGallerySlide + 1); syncGalleryTimer(); });
+  galleryDots.forEach((dot) => dot.addEventListener('click', () => { showGallerySlide(Number(dot.dataset.galleryDot)); syncGalleryTimer(); }));
+  galleryToggle?.addEventListener('click', () => { galleryPaused = !galleryPaused; syncGalleryTimer(); });
+  galleryCarousel.addEventListener('pointerenter', () => { galleryHovered = true; syncGalleryTimer(); });
+  galleryCarousel.addEventListener('pointerleave', () => { galleryHovered = false; syncGalleryTimer(); });
+  galleryCarousel.addEventListener('focusin', () => { galleryFocused = true; syncGalleryTimer(); });
+  galleryCarousel.addEventListener('focusout', (event) => {
+    if (!galleryCarousel.contains(event.relatedTarget)) { galleryFocused = false; syncGalleryTimer(); }
+  });
+  document.addEventListener('visibilitychange', syncGalleryTimer);
+  showGallerySlide(0);
+  syncGalleryTimer();
+}
+
 const quantitySelect = document.querySelector('#order-quantity');
+
+const productModal = document.querySelector('#product-modal');
+const productModalImage = document.querySelector('#product-modal-image');
+const productModalCategory = document.querySelector('#product-modal-category');
+const productModalTitle = document.querySelector('#product-modal-title');
+const productModalDescription = document.querySelector('#product-modal-description');
+const productModalClose = productModal?.querySelector('.product-modal-close');
+let productModalTrigger = null;
+let productModalPinned = false;
+let productModalCloseTimer;
+
+const closeProductModal = () => {
+  window.clearTimeout(productModalCloseTimer);
+  if (productModal?.open) productModal.close();
+  productModalTrigger?.setAttribute('aria-expanded', 'false');
+  productModalTrigger = null;
+  productModalPinned = false;
+};
+
+const openProductModal = (imageButton, pin = false) => {
+  if (!productModal || !imageButton) return;
+  window.clearTimeout(productModalCloseTimer);
+  const image = imageButton.querySelector('img');
+  const card = imageButton.closest('.related-card');
+  const title = card?.querySelector('.related-copy h3')?.textContent.trim() || '';
+  const category = card?.querySelector('.related-category')?.textContent.trim() || '';
+  const description = card?.querySelector('.related-copy>p:last-child')?.textContent.trim() || '';
+  if (productModalTrigger && productModalTrigger !== imageButton) productModalTrigger.setAttribute('aria-expanded', 'false');
+  productModalTrigger = imageButton;
+  productModalPinned = productModalPinned || pin;
+  productModalTrigger.setAttribute('aria-expanded', 'true');
+  productModalImage.src = image?.currentSrc || image?.src || '';
+  productModalImage.alt = image?.alt || title;
+  productModalCategory.textContent = category;
+  productModalTitle.textContent = title;
+  productModalDescription.textContent = description;
+  if (!productModal.open) productModal.showModal();
+};
+
+const scheduleProductModalClose = () => {
+  window.clearTimeout(productModalCloseTimer);
+  if (!productModalPinned) productModalCloseTimer = window.setTimeout(closeProductModal, 450);
+};
+
+document.querySelectorAll('.related-image').forEach((imageButton) => {
+  imageButton.addEventListener('pointerenter', (event) => {
+    if (event.pointerType === 'mouse' || event.pointerType === 'pen') openProductModal(imageButton);
+  });
+  imageButton.addEventListener('pointerleave', scheduleProductModalClose);
+  imageButton.addEventListener('click', () => openProductModal(imageButton, true));
+});
+
+productModal?.querySelector('.product-modal-card')?.addEventListener('pointerenter', () => window.clearTimeout(productModalCloseTimer));
+productModal?.querySelector('.product-modal-card')?.addEventListener('pointerleave', scheduleProductModalClose);
+productModalClose?.addEventListener('click', closeProductModal);
+productModal?.addEventListener('click', (event) => {
+  if (event.target === productModal) closeProductModal();
+});
+productModal?.addEventListener('close', () => {
+  productModalTrigger?.setAttribute('aria-expanded', 'false');
+  productModalTrigger = null;
+  productModalPinned = false;
+});
+
 const quantitySummary = document.querySelector('#quantity-summary');
 const productsTotal = document.querySelector('#products-total');
 const orderTotal = document.querySelector('#order-total');
@@ -65,10 +183,72 @@ updateOrderSummary();
 
 const orderForm = document.querySelector('#order-form');
 const orderError = document.querySelector('#order-error');
+const phoneInput = document.querySelector('#order-phone');
+const phoneError = document.querySelector('#phone-error');
 const orderApiBase = (window.CRAM_CORY_API_URL || '').replace(/\/+$/, '');
+
+const normalizePhoneDigits = (value) => String(value || '')
+  .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x660))
+  .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x6f0));
+
+const normalizeAlgerianPhone = (value) => {
+  const raw = normalizePhoneDigits(value).trim();
+  if (!raw || !/^[+0-9\s().-]+$/.test(raw)) return '';
+
+  let compact = raw.replace(/[\s().-]/g, '');
+  if (compact.startsWith('00213')) compact = `+213${compact.slice(5)}`;
+  if (compact.startsWith('213')) compact = `+${compact}`;
+
+  const localPattern = /^(?:0[567]\d{8}|0[234]\d{7}|09\d{8})$/;
+  const internationalPattern = /^\+213(?:[567]\d{8}|[234]\d{7}|9\d{8})$/;
+  if (localPattern.test(compact)) return `+213${compact.slice(1)}`;
+  if (internationalPattern.test(compact)) return compact;
+  return '';
+};
+
+const clearPhoneError = () => {
+  if (!phoneInput || !phoneError) return;
+  phoneInput.removeAttribute('aria-invalid');
+  phoneError.textContent = '';
+  phoneError.hidden = true;
+};
+
+const showPhoneError = () => {
+  if (!phoneInput || !phoneError) return;
+  phoneInput.setAttribute('aria-invalid', 'true');
+  phoneError.textContent = 'رقم الهاتف غير صحيح. يرجى إعادة المحاولة أو إدخال المعلومات الصحيحة.';
+  phoneError.hidden = false;
+};
+
+if (phoneInput) {
+  phoneInput.addEventListener('input', () => {
+    const normalized = normalizePhoneDigits(phoneInput.value);
+    if (phoneInput.value !== normalized) phoneInput.value = normalized;
+    if (normalizeAlgerianPhone(phoneInput.value)) clearPhoneError();
+  });
+
+  phoneInput.addEventListener('blur', () => {
+    if (!phoneInput.value.trim()) return;
+    if (!normalizeAlgerianPhone(phoneInput.value)) {
+      phoneInput.value = '';
+      showPhoneError();
+      return;
+    }
+    clearPhoneError();
+  });
+}
+
 if (orderForm) {
   orderForm.addEventListener('submit', async (event) => {
     event.preventDefault();
+    const normalizedPhone = normalizeAlgerianPhone(phoneInput?.value);
+    if (!normalizedPhone) {
+      if (phoneInput?.value.trim()) phoneInput.value = '';
+      showPhoneError();
+      phoneInput?.focus();
+      return;
+    }
+    clearPhoneError();
     if (!orderForm.reportValidity()) return;
 
     const submitButton = orderForm.querySelector('[type="submit"]');
@@ -82,6 +262,7 @@ if (orderForm) {
     const formData = new FormData(orderForm);
     const payload = Object.fromEntries(formData.entries());
     payload.quantity = Number(payload.quantity);
+    payload.phone = normalizedPhone;
 
     try {
       const response = await fetch(`${orderApiBase}/api/orders`, {
