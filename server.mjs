@@ -64,6 +64,24 @@ function cleanText(value, maxLength) {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, maxLength) : '';
 }
 
+function normalizeAlgerianPhone(value) {
+  const raw = String(value || '')
+    .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 0x660))
+    .replace(/[۰-۹]/g, (digit) => String(digit.charCodeAt(0) - 0x6f0))
+    .trim();
+  if (!raw || !/^[+0-9\s().-]+$/.test(raw)) return '';
+
+  let compact = raw.replace(/[\s().-]/g, '');
+  if (compact.startsWith('00213')) compact = `+213${compact.slice(5)}`;
+  if (compact.startsWith('213')) compact = `+${compact}`;
+
+  const localPattern = /^(?:0[567]\d{8}|0[234]\d{7}|09\d{8})$/;
+  const internationalPattern = /^\+213(?:[567]\d{8}|[234]\d{7}|9\d{8})$/;
+  if (localPattern.test(compact)) return `+213${compact.slice(1)}`;
+  if (internationalPattern.test(compact)) return compact;
+  return '';
+}
+
 async function readJson(request) {
   const chunks = [];
   let size = 0;
@@ -174,14 +192,18 @@ async function handleOrder(request, response) {
 
   const order = {
     fullName: cleanText(input.fullName, 100),
-    phone: cleanText(input.phone, 32),
+    phone: normalizeAlgerianPhone(input.phone),
     state: cleanText(input.state, 80),
     deliveryAddress: cleanText(input.deliveryAddress, 240),
     deliveryMethod: input.deliveryMethod,
     quantity: Number(input.quantity)
   };
 
-  if (order.fullName.length < 3 || !/^\+?[0-9][0-9\s().-]{6,24}$/.test(order.phone) || !order.state || order.deliveryAddress.length < 5 || !DELIVERY_RATES[order.deliveryMethod] || !Number.isInteger(order.quantity) || order.quantity < 1 || order.quantity > 5) {
+  if (!order.phone) {
+    return sendJson(response, 400, { message: 'رقم الهاتف غير صحيح. يرجى إدخال رقم جزائري صالح وإعادة المحاولة.' });
+  }
+
+  if (order.fullName.length < 3 || !order.state || order.deliveryAddress.length < 5 || !DELIVERY_RATES[order.deliveryMethod] || !Number.isInteger(order.quantity) || order.quantity < 1 || order.quantity > 5) {
     return sendJson(response, 400, { message: 'راجعي الاسم ورقم الهاتف والعنوان والولاية والكمية وطريقة التوصيل.' });
   }
 
