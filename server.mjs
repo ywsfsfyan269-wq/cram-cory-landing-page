@@ -123,6 +123,7 @@ async function callSupabaseRpc(functionName, payload) {
       method: 'POST',
       headers: {
         apikey: serviceRoleKey,
+        Authorization: 'Bearer ' + serviceRoleKey,
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store'
       },
