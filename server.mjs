@@ -31,7 +31,6 @@ const contentTypes = {
 };
 
 const rateLimit = new Map();
-const PRODUCT_PRICE = 1200;
 const DELIVERY_RATES = { home: 700, office: 400 };
 
 function sendJson(response, statusCode, body) {
@@ -110,6 +109,77 @@ function rateLimited(request) {
   return entry.count > 5;
 }
 
+
+async function callSupabaseRpc(functionName, payload) {
+  const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY || '';
+  if (!supabaseUrl || !publishableKey) {
+    throw Object.assign(new Error('إعداد حفظ الطلبات غير مكتمل.'), { statusCode: 503 });
+  }
+
+  let response;
+  try {
+    response = await fetch(supabaseUrl + '/rest/v1/rpc/' + encodeURIComponent(functionName), {
+      method: 'POST',
+      headers: {
+        apikey: publishableKey,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store'
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000)
+    });
+  } catch {
+    throw Object.assign(new Error('تعذر الاتصال بقاعدة البيانات. حاولي مجددًا لاحقًا.'), { statusCode: 503 });
+  }
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const databaseMessage = String(result.message || result.details || '');
+    const duplicate = databaseMessage.includes('duplicate_order_recently');
+    throw Object.assign(
+      new Error(duplicate
+        ? 'تم تسجيل طلب حديث بهذا الرقم. انتظري قليلًا ثم حاولي مرة أخرى.'
+        : 'تعذر حفظ الطلب في قاعدة البيانات. حاولي مجددًا لاحقًا.'),
+      {
+        statusCode: duplicate ? 429 : (response.status === 400 ? 400 : 503),
+        code: duplicate ? 'duplicate_order_recently' : 'supabase_order_write_failed'
+      }
+    );
+  }
+  return result;
+}
+
+async function createOrderInSupabase(order) {
+  const saved = await callSupabaseRpc('create_store_order', {
+    p_full_name: order.fullName,
+    p_phone: order.phone,
+    p_wilaya: order.state,
+    p_delivery_address: order.deliveryAddress,
+    p_delivery_method: order.deliveryMethod,
+    p_quantity: order.quantity
+  });
+  const data = Array.isArray(saved) ? saved[0] : saved;
+  if (!data || !data.id || !data.order_number || !data.notification_id) {
+    throw Object.assign(new Error('لم نحصل على تأكيد حفظ الطلب من قاعدة البيانات.'), { statusCode: 503 });
+  }
+  return data;
+}
+
+async function recordOrderNotificationResult(notificationId, status, details = {}) {
+  try {
+    await callSupabaseRpc('record_order_notification_result', {
+      p_notification_id: notificationId,
+      p_status: status,
+      p_provider_message_id: details.providerMessageId || null,
+      p_provider_http_status: Number.isInteger(details.providerHttpStatus) ? details.providerHttpStatus : null,
+      p_error_message: status === 'failed' ? String(details.errorMessage || 'Notification failed').slice(0, 500) : null
+    });
+  } catch {
+    console.error('Could not record WhatsApp notification outcome.');
+  }
+}
+
 async function sendOrderToWhatsApp(order) {
   const {
     WHATSAPP_ACCESS_TOKEN,
@@ -127,9 +197,10 @@ async function sendOrderToWhatsApp(order) {
     throw Object.assign(new Error('إعداد خدمة الرسائل غير مكتمل.'), { statusCode: 503 });
   }
 
-  const deliveryFee = DELIVERY_RATES[order.deliveryMethod];
-  const subtotal = order.quantity * PRODUCT_PRICE;
-  const total = subtotal + deliveryFee;
+  const deliveryFee = order.delivery_fee_dzd;
+  const subtotal = order.subtotal_dzd;
+  const total = order.total_dzd;
+  const unitPrice = order.unit_price_dzd;
   const params = [
     order.fullName,
     order.phone,
@@ -137,19 +208,19 @@ async function sendOrderToWhatsApp(order) {
     order.deliveryAddress,
     order.deliveryMethod === 'home' ? 'إلى المنزل' : 'إلى المكتب',
     String(order.quantity),
-    `${PRODUCT_PRICE.toLocaleString('fr-DZ')} دج`,
-    `${subtotal.toLocaleString('fr-DZ')} دج`,
-    `${deliveryFee.toLocaleString('fr-DZ')} دج`,
-    `${total.toLocaleString('fr-DZ')} دج`
+    unitPrice.toLocaleString('fr-DZ') + ' دج',
+    subtotal.toLocaleString('fr-DZ') + ' دج',
+    deliveryFee.toLocaleString('fr-DZ') + ' دج',
+    total.toLocaleString('fr-DZ') + ' دج'
   ].map((text) => ({ type: 'text', text }));
 
-  const apiUrl = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  const apiUrl = 'https://graph.facebook.com/' + WHATSAPP_API_VERSION + '/' + WHATSAPP_PHONE_NUMBER_ID + '/messages';
   let apiResponse;
   try {
     apiResponse = await fetch(apiUrl, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+        Authorization: 'Bearer ' + WHATSAPP_ACCESS_TOKEN,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -172,8 +243,15 @@ async function sendOrderToWhatsApp(order) {
   const result = await apiResponse.json().catch(() => ({}));
   if (!apiResponse.ok || !result.messages?.length) {
     console.error('WhatsApp API rejected an order notification (HTTP %s).', apiResponse.status);
-    throw Object.assign(new Error('لم نتمكن من إرسال الطلب. تحققي من البيانات وحاولي مجددًا.'), { statusCode: 502 });
+    throw Object.assign(
+      new Error('تم حفظ الطلب، لكن تعذر إرسال إشعار واتساب للمتجر.'),
+      { statusCode: 502, providerHttpStatus: apiResponse.status }
+    );
   }
+  return {
+    providerMessageId: result.messages[0].id || null,
+    providerHttpStatus: apiResponse.status
+  };
 }
 
 async function handleOrder(request, response) {
@@ -207,11 +285,29 @@ async function handleOrder(request, response) {
     return sendJson(response, 400, { message: 'راجعي الاسم ورقم الهاتف والعنوان والولاية والكمية وطريقة التوصيل.' });
   }
 
+  let savedOrder;
   try {
-    await sendOrderToWhatsApp(order);
-    return sendJson(response, 200, { ok: true });
+    savedOrder = await createOrderInSupabase(order);
   } catch (error) {
-    return sendJson(response, error.statusCode || 502, { message: error.message || 'تعذر إرسال الطلب.' });
+    return sendJson(response, error.statusCode || 503, {
+      message: error.message || 'تعذر حفظ الطلب. حاولي مجددًا لاحقًا.'
+    });
+  }
+
+  try {
+    const notification = await sendOrderToWhatsApp({ ...order, ...savedOrder });
+    await recordOrderNotificationResult(savedOrder.notification_id, 'sent', notification);
+    return sendJson(response, 200, { ok: true, orderNumber: savedOrder.order_number });
+  } catch (error) {
+    await recordOrderNotificationResult(savedOrder.notification_id, 'failed', {
+      providerHttpStatus: error.providerHttpStatus,
+      errorMessage: error.message
+    });
+    return sendJson(response, 200, {
+      ok: true,
+      orderNumber: savedOrder.order_number,
+      notificationSent: false
+    });
   }
 }
 
