@@ -112,8 +112,8 @@ function rateLimited(request) {
 
 async function callSupabaseRpc(functionName, payload) {
   const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY || '';
-  if (!supabaseUrl || !publishableKey) {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!supabaseUrl || !serviceRoleKey) {
     throw Object.assign(new Error('إعداد حفظ الطلبات غير مكتمل.'), { statusCode: 503 });
   }
 
@@ -122,7 +122,7 @@ async function callSupabaseRpc(functionName, payload) {
     response = await fetch(supabaseUrl + '/rest/v1/rpc/' + encodeURIComponent(functionName), {
       method: 'POST',
       headers: {
-        apikey: publishableKey,
+        apikey: serviceRoleKey,
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store'
       },
