@@ -274,7 +274,34 @@ if (orderForm) {
       if (!response.ok) throw new Error(result.message || 'تعذر إرسال الطلب الآن. حاولي مجددًا لاحقًا.');
 
       orderForm.className = 'order-success';
-      orderForm.innerHTML = '<div class="success-mark" aria-hidden="true">✓</div><h3>تم استلام طلبك بنجاح</h3><p>شكرًا لثقتكِ بـ Cram Cory. سنتواصل معكِ لتأكيد تفاصيل الطلب والتوصيل.</p><span class="success-reference">CRAM CORY · ORDER RECEIVED</span>';
+      orderForm.replaceChildren();
+
+      const successMark = document.createElement('div');
+      successMark.className = 'success-mark';
+      successMark.setAttribute('aria-hidden', 'true');
+      successMark.textContent = '✓';
+
+      const successTitle = document.createElement('h3');
+      successTitle.textContent = 'تم حفظ طلبك بنجاح';
+
+      const successCopy = document.createElement('p');
+      successCopy.textContent = result.notificationSent === false
+        ? 'تم حفظ طلبك، لكن تعذر إرسال إشعار واتساب للمتجر. سيبقى الطلب محفوظًا وسنتابع تأكيده.'
+        : 'شكرًا لثقتكِ بـ Cram Cory. سنتواصل معكِ لتأكيد تفاصيل الطلب والتوصيل.';
+
+      orderForm.append(successMark, successTitle, successCopy);
+
+      if (result.orderNumber) {
+        const reference = document.createElement('p');
+        reference.className = 'success-reference';
+        reference.textContent = 'رقم الطلب: ' + String(result.orderNumber);
+        orderForm.append(reference);
+      }
+
+      const brandReference = document.createElement('span');
+      brandReference.className = 'success-reference';
+      brandReference.textContent = 'CRAM CORY · ORDER RECEIVED';
+      orderForm.append(brandReference);
     } catch (error) {
       if (orderError) {
         orderError.textContent = error instanceof TypeError
